@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Tính Lãi Kép, Lãi Vay và Phân Tích Vòng Đời Dự Án</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 20px; background: #f7f7f7; }
+    h1 { color: #333; }
+    label { display: block; margin-top: 10px; }
+    input[type="number"] { padding: 5px; width: 200px; }
+    select { padding: 5px; }
+    button { margin-top: 15px; padding: 10px 20px; font-size: 16px; cursor: pointer; }
+    table { border-collapse: collapse; margin-top: 20px; width: 100%; background: white; }
+    th, td { border: 1px solid #ccc; padding: 8px; text-align: right; }
+    th { background-color: #eee; }
+    .container { max-width: 900px; margin: 0 auto; }
+    fieldset { margin-top: 20px; padding: 10px; border: 1px solid #ccc; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Tính Lãi Kép gửi tiền, Lãi vay và Phân tích Vòng đời dự án</h1>
+    <form id="calcForm">
+      <label>
+        Số tiền (VNĐ):
+        <input type="number" id="principal" min="1000" required />
+      </label>
+      <label>
+        Số tháng:
+        <input type="number" id="months" min="1" max="360" required />
+      </label>
+      <label>
+        Lãi suất hàng năm (%):
+        <input type="number" id="rate" min="0" step="0.01" required />
+      </label>
+      <label>
+        Loại tính toán:
+        <select id="calcType">
+          <option value="compound">Gửi tiền - Lãi kép</option>
+          <option value="loan">Vay tiền - Lãi vay trả dần</option>
+        </select>
+      </label>
+
+      <fieldset>
+        <legend>Phân tích vòng đời dự án</legend>
+        <label>Vốn đầu tư ban đầu (VNĐ):
+          <input type="number" id="initialInvestment" min="0" />
+        </label>
+        <label>Chi phí hàng tháng (VNĐ):
+          <input type="number" id="monthlyCost" min="0" />
+        </label>
+        <label>Doanh thu kỳ vọng hàng tháng (VNĐ):
+          <input type="number" id="monthlyRevenue" min="0" />
+        </label>
+        <label>Số năm đầu tư:
+          <input type="number" id="years" min="1" max="30" />
+        </label>
+        <label>Lãi suất chiết khấu hàng năm (%) (để tính NPV):
+          <input type="number" id="discountRate" min="0" step="0.01" />
+        </label>
+      </fieldset>
+
+      <button type="submit">Tính toán</button>
+    </form>
+    <div id="result"></div>
+  </div>
+
+  <script>
+    function formatVND(number) {
+      return number.toLocaleString('vi-VN', { style: 'currency', currency: 'VND' });
+    }
+
+    // Tính lãi kép gửi tiền
+    function calculateCompound(principal, months, annualRate) {
+      const monthlyRate = annualRate / 12 / 100;
+      let balance = principal;
+      let tableRows = '';
+      let totalInterest = 0;
+
+      for (let i = 1; i <= months; i++) {
+        const interest = balance * monthlyRate;
+        balance += interest;
+        totalInterest += interest;
+        tableRows += `<tr>
+          <td style="text-align:center">${i}</td>
+          <td>${formatVND(balance)}</td>
+          <td>${formatVND(interest)}</td>
+          <td>${formatVND(principal)}</td>
+        </tr>`;
+      }
+
+      return { tableRows, totalInterest, finalBalance: balance };
+    }
+
+    // Tính lãi vay trả dần
+    function calculateLoan(principal, months, annualRate) {
+      const monthlyRate = annualRate / 12 / 100;
+      const monthlyPayment = principal * monthlyRate / (1 - (1 + monthlyRate) ** -months);
+      let remaining = principal;
+      let tableRows = '';
+      let totalInterestPaid = 0;
+
+      for (let i = 1; i <= months; i++) {
+        const interest = remaining * monthlyRate;
+        const principalPayment = monthlyPayment - interest;
+        remaining -= principalPayment;
+        totalInterestPaid += interest;
+        tableRows += `<tr>
+          <td style="text-align:center">${i}</td>
+          <td>${formatVND(monthlyPayment)}</td>
+          <td>${formatVND(principalPayment)}</td>
+          <td>${formatVND(interest)}</td>
+          <td>${formatVND(Math.max(remaining, 0))}</td>
+        </tr>`;
+      }
+
+      return { tableRows, totalInterestPaid, totalPayment: monthlyPayment * months };
+    }
+
+    // Hàm tính NPV
+    function calculateNPV(cashFlows, annualRate) {
+      const monthlyRate = annualRate / 12 / 100;
+      return cashFlows.reduce((npv, cf, i) => npv + cf / ((1 + monthlyRate) ** (i + 1)), 0);
+    }
+
+    // Hàm tính IRR bằng phương pháp Nhị phân
+    function calculateIRR(cashFlows, guess = 0.1, maxIter = 100, tol = 1e-6) {
+      let lower = 0, upper = 1, rate = guess;
+      function npv(rate) {
+        return cashFlows.reduce((sum, cf, i) => sum + cf / ((1 + rate) ** (i + 1)), 0);
+      }
+      for (let i = 0; i < maxIter; i++) {
+        const val = npv(rate);
+        if (Math.abs(val) < tol) return rate * 100;
+        if (val > 0) lower = rate;
+        else upper = rate;
+        rate = (lower + upper) / 2;
+      }
+      return rate * 100; // %
+    }
+
+    // Hàm tính thời gian hoàn vốn PBP
+    function calculatePBP(cashFlows, initialInvestment) {
+      let cumulative = -initialInvestment;
+      for (let i = 0; i < cashFlows.length; i++) {
+        cumulative += cashFlows[i];
+        if (cumulative >= 0) return i + 1;
+      }
+      return null;
+    }
+
+    // Hàm mô phỏng vòng đời dự án với 3 năm đầu không lời, 7 năm sau có lời
+    function simulateProjectLifecycleWithROI(initialInvestment, monthlyCost, monthlyRevenue, years, discountRate) {
+      const months = years * 12;
+      let cashFlows = [];
+      for(let i = 0; i < months; i++) {
+        if(i < 36) {
+          cashFlows.push(0); // 3 năm đầu không lời
+        } else {
+          cashFlows.push(monthlyRevenue - monthlyCost); // 7 năm sau có lời
+        }
+      }
+      const npv = calculateNPV(cashFlows, discountRate) - initialInvestment;
+      const irr = calculateIRR([-initialInvestment, ...cashFlows]);
+      const pbpMonths = calculatePBP(cashFlows, initialInvestment);
+
+      // ROI = (Tổng lợi nhuận ròng / Vốn đầu tư) * 100%
+      const totalProfit = cashFlows.reduce((a,b) => a + b, 0) - initialInvestment;
+      const roi = (totalProfit / initialInvestment) * 100;
+
+      // Tạo bảng dòng tiền chi tiết
+      let tableRows = '';
+      let cumulative = -initialInvestment;
+      for(let i = 0; i < months; i++) {
+        cumulative += cashFlows[i];
+        tableRows += `<tr>
+          <td style="text-align:center">${i+1}</td>
+          <td>${formatVND(cashFlows[i])}</td>
+          <td>${formatVND(cumulative)}</td>
+        </tr>`;
+      }
+
+      return { npv, irr, pbpMonths, roi, tableRows, cashFlows };
+    }
+
+    // Hàm mô phỏng gửi tiền ngân hàng theo lãi kép thời gian tương ứng
+    function simulateBankDeposit(principal, annualRate, months) {
+      const monthlyRate = annualRate / 12 / 100;
+      let balance = principal;
+      let tableRows = '';
+      for(let i = 1; i <= months; i++) {
+        const interest = balance * monthlyRate;
+        balance += interest;
+        tableRows += `<tr>
+          <td style="text-align:center">${i}</td>
+          <td>${formatVND(balance)}</td>
+        </tr>`;
+      }
+      return {finalBalance: balance, tableRows};
+    }
+
+    document.getElementById('calcForm').addEventListener('submit', function (e) {
+      e.preventDefault();
+      const principal = parseFloat(document.getElementById('principal').value);
+      const months = parseInt(document.getElementById('months').value);
+      const annualRate = parseFloat(document.getElementById('rate').value);
+      const calcType = document.getElementById('calcType').value;
+      const resultDiv = document.getElementById('result');
+      resultDiv.innerHTML = '';
+
+      if (calcType === 'compound') {
+        const { tableRows, totalInterest, finalBalance } = calculateCompound(principal, months, annualRate);
+        resultDiv.innerHTML = `
+          <h2>Kết quả lãi kép gửi tiền</h2>
+          <p>Tiền gốc đầu tư: ${formatVND(principal)}</p>
+          <p>Tổng lãi nhận được: ${formatVND(totalInterest)}</p>
+          <p>Số tiền cuối kỳ: ${formatVND(finalBalance)}</p>
+          <table>
+            <thead>
+              <tr>
+                <th>Tháng</th>
+                <th>Số dư cuối tháng</th>
+                <th>Lãi tháng</th>
+                <th>Tiền gốc</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${tableRows}
+            </tbody>
+          </table>
+        `;
+      } else {
+        const { tableRows, totalInterestPaid, totalPayment } = calculateLoan(principal, months, annualRate);
+        resultDiv.innerHTML = `
+          <h2>Kết quả lãi vay trả dần</h2>
+          <p>Số tiền vay: ${formatVND(principal)}</p>
+          <p>Tổng tiền trả sau ${months} tháng: ${formatVND(totalPayment)}</p>
+          <p>Tổng lãi phải trả: ${formatVND(totalInterestPaid)}</p>
+          <table>
+            <thead>
+              <tr>
+                <th>Tháng</th>
+                <th>Tiền trả tháng</th>
+                <th>Trả gốc</th>
+                <th>Lãi tháng</th>
+                <th>Gốc còn lại</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${tableRows}
+            </tbody>
+          </table>
+        `;
+      }
+
+      // Phân tích vòng đời dự án nếu có nhập đủ dữ liệu
+      const initialInvestment = parseFloat(document.getElementById('initialInvestment').value);
+      const monthlyCost = parseFloat(document.getElementById('monthlyCost').value);
+      const monthlyRevenue = parseFloat(document.getElementById('monthlyRevenue').value);
+      const years = parseInt(document.getElementById('years').value);
+      const discountRate = parseFloat(document.getElementById('discountRate').value);
+
+      if (!isNaN(initialInvestment) && !isNaN(monthlyCost) && !isNaN(monthlyRevenue) && !isNaN(years) && !isNaN(discountRate)) {
+        const { npv, irr, pbpMonths, roi, tableRows, cashFlows } = simulateProjectLifecycleWithROI(initialInvestment, monthlyCost, monthlyRevenue, years, discountRate);
+        resultDiv.innerHTML += `
+          <h2>Phân tích vòng đời dự án</h2>
+          <p>NPV: ${formatVND(npv)}</p>
+          <p>IRR: ${irr.toFixed(2)}%</p>
+          <p>Thời gian hoàn vốn (PBP): ${pbpMonths === null ? 'Không hoàn vốn trong thời gian dự án' : pbpMonths + ' tháng'}</p>
+          <p>ROI: ${roi.toFixed(2)}%</p>
+          <table>
+            <thead>
+              <tr><th>Tháng</th><th>Dòng tiền tháng</th><th>Lũy kế dòng tiền</th></tr>
+            </thead>
+            <tbody>${tableRows}</tbody>
+          </table>
+        `;
+
+        // So sánh gửi ngân hàng lãi kép cùng thời gian với vốn đầu tư
+        const { finalBalance, tableRows: bankTable } = simulateBankDeposit(initialInvestment, discountRate, years * 12);
+        resultDiv.innerHTML += `
+          <h2>So sánh gửi ngân hàng (lãi kép) cùng kỳ đầu tư dự án</h2>
+          <p>Tiền gốc ban đầu: ${formatVND(initialInvestment)}</p>
+          <p>Số tiền cuối kỳ gửi ngân hàng: ${formatVND(finalBalance)}</p>
+          <table>
+            <thead>
+              <tr><th>Tháng</th><th>Số dư gửi ngân hàng</th></tr>
+            </thead>
+            <tbody>${bankTable}</tbody>
+          </table>
+        `;
+      }
+    });
+  </script>
+</body>
+</html>
